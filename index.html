@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Analisis Absensi & Cuti - SDN 17 Dauh Puri</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased relative min-h-screen flex flex-col justify-between">
+
+    <div id="loadingOverlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex flex-col justify-center items-center z-50">
+        <div class="animate-spin rounded-full h-16 w-16 border-4 border-t-indigo-600 border-indigo-200 mb-4"></div>
+        <p id="loadingText" class="text-white font-semibold text-sm tracking-wide">Menghubungkan ke database Google Sheets cloud...</p>
+    </div>
+
+    <div id="customModal" class="fixed inset-0 bg-slate-900/50 flex justify-center items-center z-50 hidden">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl text-center">
+            <span id="modalIcon" class="text-5xl block mb-3">⚠️</span>
+            <h3 id="modalTitle" class="text-lg font-bold text-slate-900 mb-1">Pemberitahuan</h3>
+            <p id="modalMessage" class="text-xs text-slate-500 mb-5">Detail pesan di sini...</p>
+            <button onclick="tutupModal()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2.5 rounded-xl transition">Mengerti</button>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto px-4 py-8 w-full grow">
+        <header class="bg-gradient-to-r from-indigo-900 to-purple-800 text-white p-6 rounded-2xl shadow-xl mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-4">
+                <div class="bg-white/10 p-3 rounded-xl text-3xl">🏫</div>
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight">Sistem Analisis Absensi & Cuti Guru</h1>
+                    <p class="text-indigo-200 text-sm font-semibold mt-0.5">SD Negeri 17 Dauh Puri</p>
+                </div>
+            </div>
+            <div class="bg-white/10 px-4 py-2 rounded-xl text-right">
+                <span class="text-[10px] block uppercase font-bold text-indigo-200">Konektivitas Cloud</span>
+                <span id="statusKoneksi" class="text-xs font-bold text-amber-400 flex items-center gap-1.5 justify-end">● Memeriksa Sinkronisasi</span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-1 space-y-6">
+                <div class="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+                    <h2 class="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">📥 Validasi & Unggah PDF</h2>
+                    <div class="space-y-4 mb-5">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase">Pilih Nama Guru / Staf:</label>
+                            <select id="selectGuru" class="w-full mt-1 px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-medium">
+                                <option value="">-- Menunggu Database Cloud --</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase">Untuk Bulan:</label>
+                                <select id="selectBulanSingle" class="w-full mt-1 px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"></select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase">Tahun:</label>
+                                <input type="number" id="inputTahunSingle" value="2026" class="w-full mt-1 px-3 py-2 text-xs border border-slate-300 rounded-lg">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="border-2 border-dashed border-indigo-400 bg-indigo-50/30 p-6 rounded-lg text-center cursor-pointer hover:bg-indigo-50 transition" onclick="document.getElementById('pdfInput').click()">
+                        <span class="text-4xl block">📄</span>
+                        <p class="text-xs font-semibold text-indigo-700 mt-2">Pilih File PDF Rekap Absen</p>
+                    </div>
+                    <input type="file" id="pdfInput" class="hidden" accept=".pdf">
+
+                    <button id="btnSimpan" onclick="kirimKeGoogleSheets()" disabled class="w-full mt-4 bg-slate-400 text-white font-bold py-2.5 rounded-lg text-xs tracking-wider uppercase cursor-not-allowed">
+                        ☁️ Simpan Ke Google Sheets
+                    </button>
+                </div>
+
+                <div id="panelHasilPDF" class="bg-white p-5 rounded-xl shadow-xs border border-slate-200 hidden">
+                    <h3 class="text-xs font-bold text-slate-900 uppercase border-b pb-2 mb-3">🔍 Hasil Analisis Berkas</h3>
+                    <div class="space-y-2 text-xs">
+                        <div class="flex justify-between border-b border-slate-50 pb-1"><span>Terlambat:</span><span class="font-bold text-red-600" id="resLate">0 mnt</span></div>
+                        <div class="flex justify-between border-b border-slate-50 pb-1"><span>Mendahului:</span><span class="font-bold text-amber-600" id="resEarly">0 mnt</span></div>
+                        <div class="flex justify-between text-indigo-700 font-semibold"><span>🌴 Cuti Tahunan:</span><span id="resCutiTahunan">0 Hari</span></div>
+                        <div class="flex justify-between text-emerald-700 font-semibold"><span>🏥 Cuti Sakit:</span><span id="resCutiSakit">0 Hari</span></div>
+                        <div class="flex justify-between text-purple-700 font-semibold"><span>👶 Cuti Melahirkan:</span><span id="resCutiMelahirkan">0 Hari</span></div>
+                        <div class="flex justify-between text-cyan-700 font-semibold"><span>📋 Cuti Alasan Penting:</span><span id="resCutiPenting">0 Hari</span></div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+                    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">🔍 Cek Kelengkapan Berkas</h2>
+                    <button onclick="periksaKelengkapanBerkas()" class="w-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-2 rounded-lg transition shadow-xs">Periksa Status Pengumpulan</button>
+                    <div id="boxBelumUnggah" class="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-100 hidden">
+                        <p class="text-[11px] font-bold text-slate-700 mb-2">Daftar Belum Mengunggah:</p>
+                        <ul id="listBelumUnggah" class="text-[11px] space-y-1 text-red-600 font-medium list-disc list-inside"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-white p-5 rounded-xl shadow-xs border border-slate-200 space-y-4">
+                    <div class="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between border-b border-slate-100 pb-3">
+                        <h2 class="text-sm font-bold text-slate-900">🎛️ Dashboard Monitoring Kepala Sekolah</h2>
+                        <div class="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                            <button onclick="ubahSatuanWaktu('jam')" id="btnSatuanJam" class="px-2.5 py-1 bg-white shadow-xs text-slate-800 rounded-md text-xs font-semibold border border-slate-200">Jam</button>
+                            <button onclick="ubahSatuanWaktu('menit')" id="btnSatuanMenit" class="px-2.5 py-1 bg-indigo-600 text-white rounded-md text-xs font-semibold">Menit</button>
+                            <button onclick="ubahSatuanWaktu('detik')" id="btnSatuanDetik" class="px-2.5 py-1 bg-white shadow-xs text-slate-800 rounded-md text-xs font-semibold border border-slate-200">Detik</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-indigo-50/40 p-3 rounded-lg border border-indigo-100/50">
+                        <div>
+                            <label class="block text-[10px] font-bold text-indigo-900 uppercase">Dari Bulan:</label>
+                            <select id="filterBulanAwal" onchange="initDashboard()" class="w-full mt-1 px-2.5 py-1.5 text-xs border border-indigo-200 rounded-md bg-white"></select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-indigo-900 uppercase">Sampai Bulan:</label>
+                            <select id="filterBulanAkhir" onchange="initDashboard()" class="w-full mt-1 px-2.5 py-1.5 text-xs border border-indigo-200 rounded-md bg-white"></select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-indigo-900 uppercase">Tahun:</label>
+                            <input type="number" id="filterTahun" value="2026" onchange="initDashboard()" class="w-full mt-1 px-2.5 py-1.5 text-xs border border-indigo-200 rounded-md bg-white">
+                        </div>
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-100 flex justify-end">
+                        <button onclick="eksporLaporanKePDFA4()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer">🖨️ Cetak / Simpan Laporan PDF (A4)</button>
+                    </div>
+                </div>
+
+                <div id="areaLaporanCetak" class="space-y-6">
+                    <div id="headerDokumenCetak" class="hidden p-4 text-center border-b-2 border-slate-900 mb-6 bg-white">
+                        <h2 class="text-lg font-bold uppercase tracking-tight text-slate-950">LAPORAN AKUMULASI ABSENSI & RINCIAN CUTI PEGAWAI</h2>
+                        <h3 class="text-sm font-semibold text-slate-800">SD NEGERI 17 DAUH PURI</h3>
+                        <p id="txtPeriodeCetak" class="text-xs text-slate-600 mt-1 font-medium"></p>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+                        <h2 class="text-sm font-bold text-red-600 mb-4">🚨 Grafik Analisis Keterlambatan & Mendahului Pulang (Horizontal)</h2>
+                        <div class="relative min-h-[300px]">
+                            <canvas id="chartWaktu"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="html2pdf__page-break"></div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+                        <h2 class="text-sm font-bold text-indigo-600 mb-4">🌴 Grafik Distribusi Pengambilan Cuti Tahunan & Khusus (Horizontal)</h2>
+                        <div class="relative min-h-[300px]">
+                            <canvas id="chartCuti"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="html2pdf__page-break"></div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-xs border border-slate-200 space-y-4">
+                        <div id="opsiTabelHeader" class="flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center border-b pb-3 border-slate-100">
+                            <h2 class="text-sm font-bold text-slate-900">🏆 Rekapan Akumulasi & Sistem Ranking Guru</h2>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] font-bold text-slate-500 uppercase">Urutkan:</label>
+                                <select id="selectSorting" onchange="initDashboard()" class="px-2 py-1 text-xs border border-slate-300 rounded-md bg-slate-50 font-medium">
+                                    <option value="sheets">Sesuai Urutan Google Sheets</option>
+                                    <option value="pelanggaran_terbanyak">Pelanggaran Waktu Terbanyak</option>
+                                    <option value="pelanggaran_tersedikit">Pelanggaran Waktu Tersedikit (Paling Disiplin)</option>
+                                    <option value="cuti_terbanyak">Total Cuti Terbanyak</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div id="opsiTabelCari" class="w-full">
+                            <input type="text" id="searchGuru" onkeyup="initDashboard()" placeholder="🔍 Cari nama guru atau staf sekolah di sini..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-slate-50 focus:outline-indigo-500">
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-[11px] border-collapse">
+                                <thead class="bg-slate-50 text-slate-700 uppercase text-[9px] tracking-wider border-b">
+                                    <tr>
+                                        <th class="px-3 py-3 text-center w-12 border-b">Rank</th>
+                                        <th class="px-3 py-3 border-b">Nama Pegawai</th>
+                                        <th class="px-2 py-3 text-center border-b border-x" colspan="2">Kinerja Waktu</th>
+                                        <th class="px-2 py-3 text-center border-b" colspan="4">Rincian Penggunaan Cuti (Hari)</th>
+                                    </tr>
+                                    <tr class="bg-slate-100 text-[8px] border-b">
+                                        <th class="px-1 py-1 text-center bg-slate-200">#</th>
+                                        <th class="px-2 py-1"></th>
+                                        <th class="px-2 py-1 text-center text-red-600 border-l" id="thTerlambat">Terlambat</th>
+                                        <th class="px-2 py-1 text-center text-amber-600 border-r" id="thMendahului">Mendahului</th>
+                                        <th class="px-2 py-1 text-center text-indigo-700 font-bold">🌴 Tahunan</th>
+                                        <th class="px-2 py-1 text-center text-emerald-700 font-bold">🏥 Sakit</th>
+                                        <th class="px-2 py-1 text-center text-purple-700 font-bold">👶 Melahirkan</th>
+                                        <th class="px-2 py-1 text-center text-cyan-700 font-bold">📋 Penting</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabelDatabase" class="divide-y divide-slate-100 text-slate-700">
+                                    <tr><td colspan="8" class="text-center py-4 text-slate-400">Menghubungkan basis data...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div> 
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-slate-900 text-slate-400 text-center py-4 text-xs border-t border-slate-800 w-full mt-12">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
+            <p>© 2026 <span class="text-white font-semibold">SD Negeri 17 Dauh Puri</span>. All Rights Reserved.</p>
+            <p>Sistem Dikembangkan Oleh: <span class="text-indigo-400 font-bold tracking-wide">3D Creative</span></p>
+        </div>
+    </footer>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        // SALIN DAN TEMPELKAN URL WEB APP APPS SCRIPT ANDA DI SINI:
+        const API_URL_SHEETS = "https://script.google.com/macros/s/AKfycbwJnMDT5EzcxeCs8tfAMeE8jibjPGVIYKRi1ns9izLnB1hDlE8w_NPBUkzVt12OB1exeQ/exec";
+
+        let DAFTAR_GURU_TETAP = [];
+        let mockGoogleSheetsDB = [];
+
+        const DAFTAR_BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+        let dataHasilEkstraksi = null;
+        let chartWaktuInstance = null;
+        let chartCutiInstance = null;
+        let satuanWaktuAktif = 'menit'; 
+
+        initPilihanBulan();
+        muatDataDariGoogleSheets(); 
+
+        function initPilihanBulan() {
+            const bSingle = document.getElementById('selectBulanSingle');
+            const bAwal = document.getElementById('filterBulanAwal');
+            const bAkhir = document.getElementById('filterBulanAkhir');
+            bSingle.innerHTML = ""; bAwal.innerHTML = ""; bAkhir.innerHTML = "";
+            DAFTAR_BULAN.forEach((bln, idx) => {
+                bSingle.innerHTML += `<option value="${bln}">${bln}</option>`;
+                bAwal.innerHTML += `<option value="${bln}" ${idx===0?'selected':''}>${bln}</option>`;
+                bAkhir.innerHTML += `<option value="${bln}" ${idx===11?'selected':''}>${bln}</option>`;
+            });
+        }
+
+        function inisialisasiKomponenNama() {
+            const selectGuruElement = document.getElementById('selectGuru');
+            if (DAFTAR_GURU_TETAP.length === 0) {
+                selectGuruElement.innerHTML = '<option value="">-- Google Sheets Kosong/Belum Terhubung --</option>';
+                return;
+            }
+            selectGuruElement.innerHTML = '<option value="">-- Pilih Nama Terlebih Dahulu --</option>';
+            DAFTAR_GURU_TETAP.forEach(nama => {
+                selectGuruElement.innerHTML += `<option value="${nama}">${nama}</option>`;
+            });
+        }
+
+        function tampilkanLoading(pesan) {
+            document.getElementById('loadingText').innerText = pesan;
+            document.getElementById('loadingOverlay').classList.remove('hidden');
+        }
+
+        function sembunyikanLoading() { document.getElementById('loadingOverlay').classList.add('hidden'); }
+        function bukaModal(judul, pesan, ikon) { document.getElementById('modalIcon').innerText = ikon; document.getElementById('modalTitle').innerText = judul; document.getElementById('modalMessage').innerText = pesan; document.getElementById('customModal').classList.remove('hidden'); }
+        function tutupModal() { document.getElementById('customModal').classList.add('hidden'); }
+
+        function muatDataDariGoogleSheets() {
+            if(!API_URL_SHEETS || API_URL_SHEETS.includes("MASUKKAN_URL")) {
+                document.getElementById('statusKoneksi').className = "text-xs font-bold text-red-500 flex items-center gap-1.5 justify-end";
+                document.getElementById('statusKoneksi').innerText = "● URL API Kosong";
+                sembunyikanLoading();
+                initDashboard();
+                return;
+            }
+
+            fetch(API_URL_SHEETS)
+                .then(res => res.json())
+                .then(pangkalanData => {
+                    if(pangkalanData.guruTersedia) DAFTAR_GURU_TETAP = pangkalanData.guruTersedia;
+                    if(pangkalanData.laporanAbsen) mockGoogleSheetsDB = pangkalanData.laporanAbsen;
+                    
+                    document.getElementById('statusKoneksi').className = "text-xs font-bold text-emerald-500 flex items-center gap-1.5 justify-end";
+                    document.getElementById('statusKoneksi').innerText = "● Terhubung Cloud";
+                    
+                    inisialisasiKomponenNama();
+                    initDashboard();
+                    sembunyikanLoading();
+                })
+                .catch(err => {
+                    document.getElementById('statusKoneksi').className = "text-xs font-bold text-red-500 flex items-center gap-1.5 justify-end";
+                    document.getElementById('statusKoneksi').innerText = "● Gagal Koneksi";
+                    sembunyikanLoading();
+                    initDashboard();
+                });
+        }
+
+        document.getElementById('pdfInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const namaTerpilih = document.getElementById('selectGuru').value;
+            const bulanTerpilih = document.getElementById('selectBulanSingle').value;
+            const tahunTerpilih = document.getElementById('inputTahunSingle').value;
+
+            if(!namaTerpilih) {
+                bukaModal("Pilihan Kosong", "Harap pilih Nama Guru terlebih dahulu!", "❌");
+                this.value = '';
+                return;
+            }
+
+            tampilkanLoading("Memindai Teks & Mengelompokkan Jenis Cuti PDF...");
+
+            const fileReader = new FileReader();
+            fileReader.onload = async function() {
+                const typedarray = new Uint8Array(this.result);
+                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                let fullText = "";
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+                }
+
+                sembunyikanLoading();
+                validasiDanEkstrakTeks(fullText, namaTerpilih, bulanTerpilih, tahunTerpilih);
+            };
+            fileReader.readAsArrayBuffer(file);
+        });
+
+        function validasiDanEkstrakTeks(text, namaForm, bulanForm, tahunForm) {
+            const namaClean = namaForm.split(',')[0].toLowerCase().trim();
+            const teksLower = text.toLowerCase();
+
+            // Validasi Kecocokan Nama
+            if (!teksLower.includes(namaClean)) {
+                bukaModal("Berkas Tidak Sesuai!", `Nama berkas tidak cocok! Anda memilih "${namaForm}", tetapi berkas ini milik guru lain.`, "🚫");
+                document.getElementById('pdfInput').value = '';
+                return;
+            }
+
+            // PERBAIKAN CERDAS: Deteksi Multi-Format Bulan (Kata "Mei" atau Angka "05")
+            const indeksBulan = DAFTAR_BULAN.indexOf(bulanForm) + 1;
+            const formatAngkaBulan = indeksBulan < 10 ? "0" + indeksBulan : "" + indeksBulan; // Menghasilkan "05"
+            
+            const cocokNamaBulan = teksLower.includes(bulanForm.toLowerCase());
+            const cocokAngkaBulan = teksLower.includes("periode: " + formatAngkaBulan) || teksLower.includes("/" + formatAngkaBulan + "/");
+
+            if (!cocokNamaBulan && !cocokAngkaBulan) {
+                bukaModal("Bulan Tidak Sesuai!", `Periode berkas tidak cocok! Anda memilih bulan "${bulanForm}".`, "📅");
+                document.getElementById('pdfInput').value = '';
+                return;
+            }
+
+            if (!text.includes(tahunForm)) {
+                bukaModal("Tahun Tidak Sesuai!", `Tahun berkas tidak sesuai! Form memilih tahun "${tahunForm}".`, "⏳");
+                document.getElementById('pdfInput').value = '';
+                return;
+            }
+
+            // Ekstraksi Nilai Angka Keterlambatan & Mendahului
+            let menitTerlambat = 0;
+            let matchTerlambat = text.match(/Terlambat\s+(\d+)\s+menit/i);
+            if(matchTerlambat) menitTerlambat = parseInt(matchTerlambat[1]);
+
+            let menitMendahului = 0;
+            let matchMendahului = text.match(/Mendahului\s+(\d+)\s+menit/i);
+            if(matchMendahului) menitMendahului = parseInt(matchMendahului[1]);
+
+            let barisTeks = text.split("\n");
+            let setTahunan = new Set(); let setSakit = new Set(); let setMelahirkan = new Set(); let setPenting = new Set();
+            let regexTanggal = /(\d{2}[-\/]\d{2}[-\/]\d{4})/;
+
+            barisTeks.forEach(baris => {
+                let cariTanggal = baris.match(regexTanggal);
+                if (cariTanggal) {
+                    let tgl = cariTanggal[1];
+                    let bLower = baris.toLowerCase();
+                    if (bLower.includes("cuti tahunan")) setTahunan.add(tgl);
+                    if (bLower.includes("cuti sakit")) setSakit.add(tgl);
+                    if (bLower.includes("cuti melahirkan")) setMelahirkan.add(tgl);
+                    if (bLower.includes("cuti alasan penting")) setPenting.add(tgl);
+                }
+            });
+
+            dataHasilEkstraksi = {
+                nama: namaForm, periode: bulanForm, tahun: parseInt(tahunForm),
+                terlambat: menitTerlambat, mendahului: menitMendahului,
+                cutiTahunan: setTahunan.size, cutiSakit: setSakit.size, cutiMelahirkan: setMelahirkan.size, cutiPenting: setPenting.size
+            };
+
+            document.getElementById('resLate').innerText = menitTerlambat + " mnt";
+            document.getElementById('resEarly').innerText = menitMendahului + " mnt";
+            document.getElementById('resCutiTahunan').innerText = setTahunan.size + " Hari";
+            document.getElementById('resCutiSakit').innerText = setSakit.size + " Hari";
+            document.getElementById('resCutiMelahirkan').innerText = setMelahirkan.size + " Hari";
+            document.getElementById('resCutiPenting').innerText = setPenting.size + " Hari";
+
+            document.getElementById('panelHasilPDF').classList.remove('hidden');
+            const btn = document.getElementById('btnSimpan');
+            btn.disabled = false;
+            btn.className = "w-full mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg text-xs tracking-wider uppercase shadow-md cursor-pointer transition";
+            
+            bukaModal("Berkas Valid!", `Dokumen terverifikasi milik ${namaForm}. Rincian absensi berhasil dianalisis.`, "✅");
+        }
+
+        function kirimKeGoogleSheets() {
+            if(!dataHasilEkstraksi || !API_URL_SHEETS || API_URL_SHEETS.includes("MASUKKAN_URL")) return;
+            tampilkanLoading("Mengirim data rekap baru ke cloud Google Sheets...");
+            
+            fetch(API_URL_SHEETS, {
+                method: "POST",
+                mode: "no-cors",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(dataHasilEkstraksi)
+            }).then(() => {
+                bukaModal("Simpan Berhasil", "Data baru berhasil disimpan permanen ke Google Sheets cloud. Merefresh dasbor...", "🎉");
+                setTimeout(() => { muatDataDariGoogleSheets(); }, 1000);
+            }).catch(err => {
+                sembunyikanLoading();
+                bukaModal("Pengiriman Gagal", "Terjadi kesalahan jaringan saat menyimpan data.", "❌");
+            });
+        }
+
+        function periksaKelengkapanBerkas() {
+            tampilkanLoading("Menganalisis riwayat pengumpulan berkas...");
+            setTimeout(() => {
+                const bAwalIdx = DAFTAR_BULAN.indexOf(document.getElementById('filterBulanAwal').value);
+                const bAkhirIdx = DAFTAR_BULAN.indexOf(document.getElementById('filterBulanAkhir').value);
+                const thnTarget = parseInt(document.getElementById('filterTahun').value);
+
+                let listBelum = [];
+                let bulanTerpilihRange = DAFTAR_BULAN.slice(bAwalIdx, bAkhirIdx + 1);
+
+                DAFTAR_GURU_TETAP.forEach(guru => {
+                    bulanTerpilihRange.forEach(bln => {
+                        let ada = mockGoogleSheetsDB.some(db => db.nama === guru && db.periode === bln && db.tahun === thnTarget);
+                        if(!ada) listBelum.push(`${guru.split(',')[0]} (${bln})`);
+                    });
+                });
+
+                sembunyikanLoading();
+                const box = document.getElementById('boxBelumUnggah');
+                const ul = document.getElementById('listBelumUnggah');
+                box.classList.remove('hidden');
+                ul.innerHTML = '';
+
+                if(listBelum.length > 0) {
+                    listBelum.forEach(item => { ul.innerHTML += `<li>${item}</li>`; });
+                    bukaModal("Pengecekan Selesai", `Ditemukan ${listBelum.length} berkas guru yang belum diunggah.`, "⚠️");
+                } else {
+                    ul.innerHTML = `<li class="text-emerald-600 list-none font-bold">✨ Semua berkas untuk rentang ini lengkap!</li>`;
+                    bukaModal("Lengkap!", "Semua guru sudah melengkapi berkas absensi di periode ini.", "✨");
+                }
+            }, 300);
+        }
+
+        function dapatkanNilaiKonversi(menit) {
+            if (satuanWaktuAktif === 'jam') return parseFloat((menit / 60).toFixed(2));
+            if (satuanWaktuAktif === 'detik') return menit * 60;
+            return menit;
+        }
+
+        function ubahSatuanWaktu(satuan) {
+            satuanWaktuAktif = satuan;
+            ['Jam', 'Menit', 'Detik'].forEach(s => {
+                const el = document.getElementById('btnSatuan' + s);
+                if (el) el.className = s.toLowerCase() === satuan ? "px-2.5 py-1 bg-indigo-600 text-white rounded-md text-xs font-semibold" : "px-2.5 py-1 bg-white text-slate-800 rounded-md text-xs font-semibold border border-slate-200";
+            });
+            initDashboard();
+        }
+
+        function initDashboard() {
+            const bAwal = document.getElementById('filterBulanAwal').value;
+            const bAkhir = document.getElementById('filterBulanAkhir').value;
+            const bAwalIdx = DAFTAR_BULAN.indexOf(bAwal);
+            const bAkhirIdx = DAFTAR_BULAN.indexOf(bAkhir);
+            const thnTarget = parseInt(document.getElementById('filterTahun').value);
+            const sortingType = document.getElementById('selectSorting').value;
+            const keywordSearch = document.getElementById('searchGuru').value ? document.getElementById('searchGuru').value.toLowerCase().trim() : "";
+
+            document.getElementById('txtPeriodeCetak').innerText = `Periode Kinerja: ${bAwal} s/d ${bAkhir} ${thnTarget}`;
+
+            const labelSatuan = satuanWaktuAktif.charAt(0).toUpperCase() + satuanWaktuAktif.slice(1);
+            document.getElementById('thTerlambat').innerText = `Terlambat (${labelSatuan.substring(0,3)})`;
+            document.getElementById('thMendahului').innerText = `Mendahului (${labelSatuan.substring(0,3)})`;
+
+            let dataTerfilter = mockGoogleSheetsDB.filter(x => {
+                let idxBulanData = DAFTAR_BULAN.indexOf(x.periode);
+                return idxBulanData >= bAwalIdx && idxBulanData <= bAkhirIdx && x.tahun === thnTarget;
+            });
+
+            let dataAkumulasi = {};
+            DAFTAR_GURU_TETAP.forEach(nama => {
+                dataAkumulasi[nama] = { nama: nama, terlambat: 0, mendahului: 0, cutiTahunan: 0, cutiSakit: 0, cutiMelahirkan: 0, cutiPenting: 0 };
+            });
+
+            dataTerfilter.forEach(x => {
+                if(dataAkumulasi[x.nama]) {
+                    dataAkumulasi[x.nama].terlambat += x.terlambat;
+                    dataAkumulasi[x.nama].mendahului += x.mendahului;
+                    dataAkumulasi[x.nama].cutiTahunan += x.cutiTahunan;
+                    dataAkumulasi[x.nama].cutiSakit += x.cutiSakit;
+                    dataAkumulasi[x.nama].cutiMelahirkan += x.cutiMelahirkan;
+                    dataAkumulasi[x.nama].cutiPenting += x.cutiPenting;
+                }
+            });
+
+            let listHasilAkhir = Object.values(dataAkumulasi);
+
+            if(keywordSearch !== "") {
+                listHasilAkhir = listHasilAkhir.filter(guru => guru.nama.toLowerCase().includes(keywordSearch));
+            }
+
+            if(sortingType === 'pelanggaran_terbanyak') {
+                listHasilAkhir.sort((a,b) => (b.terlambat + b.mendahului) - (a.terlambat + a.mendahului));
+            } else if(sortingType === 'pelanggaran_tersedikit') {
+                listHasilAkhir.sort((a,b) => (a.terlambat + a.mendahului) - (b.terlambat + b.mendahului));
+            } else if(sortingType === 'cuti_terbanyak') {
+                listHasilAkhir.sort((a,b) => (b.cutiTahunan + b.cutiSakit + b.cutiMelahirkan + b.cutiPenting) - (a.cutiTahunan + a.cutiSakit + a.cutiMelahirkan + a.cutiPenting));
+            }
+
+            const jumlahGuruTampil = listHasilAkhir.length;
+            const containerChartWaktu = document.getElementById('chartWaktu').parentElement;
+            const containerChartCuti = document.getElementById('chartCuti').parentElement;
+            
+            const tinggiDinamis = jumlahGuruTampil > 5 ? `${jumlahGuruTampil * 45}px` : "300px";
+            containerChartWaktu.style.height = tinggiDinamis;
+            containerChartCuti.style.height = tinggiDinamis;
+
+            const tbody = document.getElementById('tabelDatabase');
+            tbody.innerHTML = '';
+
+            if(listHasilAkhir.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400 bg-slate-50 font-medium">Belum ada data dari Google Sheets.</td></tr>`;
+            } else {
+                listHasilAkhir.forEach((x, index) => {
+                    let badgeRankClass = "bg-slate-100 text-slate-700";
+                    if(sortingType === 'pelanggaran_tersedikit' && index === 0 && (x.terlambat + x.mendahului === 0)) {
+                        badgeRankClass = "bg-emerald-500 text-white font-bold";
+                    } else if(index === 0) badgeRankClass = "bg-amber-500 text-white font-bold";
+                    else if(index === 1) badgeRankClass = "bg-slate-300 text-slate-800 font-bold";
+                    else if(index === 2) badgeRankClass = "bg-amber-700 text-amber-50 font-bold";
+
+                    tbody.innerHTML += `
+                        <tr class="border-b border-slate-100 hover:bg-slate-50/80 transition">
+                            <td class="px-1 py-2.5 text-center"><span class="px-2 py-0.5 rounded-md text-[10px] ${badgeRankClass}">${index + 1}</span></td>
+                            <td class="px-3 py-2.5 font-semibold text-slate-900">${x.nama}</td>
+                            <td class="px-2 py-2.5 text-center text-red-600 font-bold border-l">${dapatkanNilaiKonversi(x.terlambat)} ${satuanWaktuAktif.substring(0,3)}</td>
+                            <td class="px-2 py-2.5 text-center text-amber-600 font-bold border-r">${dapatkanNilaiKonversi(x.mendahului)} ${satuanWaktuAktif.substring(0,3)}</td>
+                            <td class="px-2 py-2.5 text-center text-indigo-700 bg-indigo-50/30 font-bold">${x.cutiTahunan} Hri</td>
+                            <td class="px-2 py-2.5 text-center text-emerald-700 bg-emerald-50/30 font-bold">${x.cutiSakit} Hri</td>
+                            <td class="px-2 py-2.5 text-center text-purple-700 bg-purple-50/30 font-bold">${x.cutiMelahirkan} Hri</td>
+                            <td class="px-2 py-2.5 text-center text-cyan-700 bg-cyan-50/30 font-bold">${x.cutiPenting} Hri</td>
+                        </tr>
+                    `;
+                });
+            }
+
+            let labelGrafik = listHasilAkhir.map(x => x.nama.split(',')[0]);
+            let dataTerlambat = listHasilAkhir.map(x => dapatkanNilaiKonversi(x.terlambat));
+            let dataMendahului = listHasilAkhir.map(x => dapatkanNilaiKonversi(x.mendahului));
+
+            if (labelGrafik.length === 0) {
+                labelGrafik = ["Menunggu data dari Google Sheets..."];
+                dataTerlambat = [0];
+                dataMendahului = [0];
+            }
+
+            const ctxWaktu = document.getElementById('chartWaktu').getContext('2d');
+            if(chartWaktuInstance) chartWaktuInstance.destroy();
+            chartWaktuInstance = new Chart(ctxWaktu, {
+                type: 'bar',
+                data: {
+                    labels: labelGrafik,
+                    datasets: [
+                        { label: `Terlambat (${satuanWaktuAktif})`, data: dataTerlambat, backgroundColor: '#ef4444' },
+                        { label: `Mendahului (${satuanWaktuAktif})`, data: dataMendahului, backgroundColor: '#f59e0b' }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    animation: { duration: 0 }, 
+                    scales: { x: { beginAtZero: true } }
+                }
+            });
+
+            const ctxCuti = document.getElementById('chartCuti').getContext('2d');
+            if(chartCutiInstance) chartCutiInstance.destroy();
+            chartCutiInstance = new Chart(ctxCuti, {
+                type: 'bar',
+                data: {
+                    labels: labelGrafik,
+                    datasets: [
+                        { label: 'Cuti Tahunan (Hari)', data: listHasilAkhir.length ? listHasilAkhir.map(x => x.cutiTahunan) : [0], backgroundColor: '#4f46e5' },
+                        { label: 'Cuti Sakit (Hari)', data: listHasilAkhir.length ? listHasilAkhir.map(x => x.cutiSakit) : [0], backgroundColor: '#10b981' },
+                        { label: 'Cuti Melahirkan (Hari)', data: listHasilAkhir.length ? listHasilAkhir.map(x => x.cutiMelahirkan) : [0], backgroundColor: '#a855f7' },
+                        { label: 'Cuti Alasan Penting (Hari)', data: listHasilAkhir.length ? listHasilAkhir.map(x => x.cutiPenting) : [0], backgroundColor: '#06b6d4' }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    animation: { duration: 0 },
+                    scales: { x: { beginAtZero: true } }
+                }
+            });
+        }
+
+// PERBAIKAN FINAL: Cetak Hanya Tabel Rekapan (Grafik Dihilangkan Total)
+function eksporLaporanKePDFA4() {
+    // 1. Tambahkan CSS Cetak Khusus untuk menyembunyikan grafik dan merapikan tabel
+    const gayaCetak = document.createElement('style');
+    gayaCetak.id = 'gaya-cetak-spesifik';
+    gayaCetak.innerHTML = `
+        @media print {
+            /* 1. Sembunyikan Sidebar Kiri, Header Web, Footer, dan Semua Tombol */
+            body > *:not(.max-w-7xl),
+            .lg\\:col-span-1, 
+            header, 
+            footer, 
+            button, 
+            .grid.grid-cols-1.sm\\:grid-cols-3,
+            #opsiTabelHeader,
+            #opsiTabelCari {
+                display: none !important;
+            }
+            
+            /* 2. SEMBUNYIKAN GRAFIK SECARA TOTAL SAAT DICETAK */
+            .bg-white:has(canvas),
+            canvas,
+            #chartWaktu,
+            #chartCuti,
+            .html2pdf__page-break {
+                display: none !important;
+                height: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            
+            /* 3. Lebarkan area tabel agar memanfaatkan 100% lebar kertas A4 */
+            .lg\\:col-span-2 {
+                width: 100% !important;
+                position: absolute;
+                left: 0;
+                top: 0;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            
+            /* 4. Tampilkan Kop Surat Resmi di Bagian Paling Atas */
+            #headerDokumenCetak {
+                display: block !important;
+                margin-bottom: 25px !important;
+                border-bottom: 3px double #000 !important;
+                padding-bottom: 10px !important;
+            }
+            
+            /* 5. Pengaturan Ukuran Kertas A4 Portrait */
+            @page {
+                size: A4 portrait;
+                margin: 15mm 15mm 15mm 15mm;
+            }
+            
+            /* 6. Desain Khusus Tabel agar Tulisan Jelas & Tidak Terpotong Jelek */
+            table {
+                page-break-inside: auto !important;
+                width: 100% !important;
+                border: 1px solid #cbd5e1 !important;
+            }
+            
+            tr {
+                page-break-inside: avoid !important; /* Mencegah baris nama guru terpotong di tengah kertas */
+                page-break-after: auto !important;
+            }
+            
+            th, td {
+                padding: 8px 6px !important; /* Membuat baris tabel sedikit lebih longgar agar mudah dibaca */
+                border: 1px solid #e2e8f0 !important;
+            }
+            
+            thead {
+                display: table-header-group !important; /* Judul kolom otomatis muncul lagi jika tabel bersambung ke halaman 2 */
+            }
+
+            .bg-white {
+                box-shadow: none !important;
+                border: none !important;
+                padding: 0 !important;
+            }
+        }
+    `;
+    document.head.appendChild(gayaCetak);
+
+    // 2. Munculkan Kop Surat Laporan
+    const headerCetak = document.getElementById('headerDokumenCetak');
+    if (headerCetak) headerCetak.classList.remove('hidden');
+
+    // 3. Pemicu Jendela Cetak Browser (Ctrl + P)
+    setTimeout(() => {
+        window.print();
+
+        // 4. Setelah jendela cetak ditutup, kembalikan tampilan web ke kondisi normal (grafik muncul lagi di layar)
+        if (headerCetak) headerCetak.classList.add('hidden');
+        const elemenGaya = document.getElementById('gaya-cetak-spesifik');
+        if (elemenGaya) elemenGaya.remove();
+    }, 400);
+}
+
+</script>
+</body>
+</html>
